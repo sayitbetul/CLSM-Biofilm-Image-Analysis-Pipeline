@@ -71,30 +71,41 @@ class BiofilmProcessor:
 
         return self.sharpened_data
     
-    def enhance_contrast(self):
-        """Enhance contrast using adaptive histogram equalization"""
-        if self.sharpened_data is None:
-            self.sharpened_data = self.processed_data
+    def fourier_based_sharpening(self):
+            # Handle RGB images
+            if len(self.processed_data.shape) == 3:
+                # Process each channel separately
+                sharpened = np.zeros_like(self.processed_data)
+                for channel in range(self.processed_data.shape[2]):
+                    # Get 2D slice
+                    channel_data = self.processed_data[:,:,channel]
+                    
+                    # Fourier transform
+                    f_transform = np.fft.fft2(channel_data)
+                    f_shift = np.fft.fftshift(f_transform)
+    
+                    # Create high-pass filter mask
+                    rows, cols = channel_data.shape
+                    crow, ccol = rows // 2, cols // 2
+                    mask = np.ones((rows, cols), dtype=np.float32)
+                    r = 30  # Kernel size, high frequency threshold
+                    center = (crow, ccol)
+                    for i in range(rows):
+                        for j in range(cols):
+                            if np.sqrt((i - center[0])**2 + (j - center[1])**2) < r:
+                                mask[i, j] = 0
+    
+                    # Apply mask
+                    f_filtered = f_shift * mask
+                    f_ishift = np.fft.ifftshift(f_filtered)
+                    channel_filtered = np.abs(np.fft.ifft2(f_ishift))
+                    
+                    # Store result
+                    sharpened[:,:,channel] = channel_filtered
+                    
+                # Normalize result
+                self.enhanced_data = exposure.rescale_intensity(sharpened)
 
-        # Kontrol: 3D görüntü mü yoksa 2D mi?
-        if len(self.sharpened_data.shape) == 3:  # 3D stack
-            self.enhanced_data = np.zeros_like(self.sharpened_data, dtype=np.float32)
-            for z in range(self.sharpened_data.shape[0]):
-                # Skimage'in normalize fonksiyonu ile her slice'ı normalize et
-                normalized_slice = exposure.rescale_intensity(self.sharpened_data[z])
-                self.enhanced_data[z] = exposure.equalize_adapthist(
-                    normalized_slice, clip_limit=0.03
-                )
-        else:  # 2D durumunda
-            normalized = exposure.rescale_intensity(self.sharpened_data)
-            self.enhanced_data = exposure.equalize_adapthist(
-                normalized, clip_limit=0.03
-            )
-
-        # Enhanced data'yı uint8'e dönüştür (bazı görselleştirme araçları için gerekli olabilir)
-        self.enhanced_data = (self.enhanced_data * 255).astype(np.uint8)
-
-        return self.enhanced_data
 
             
     def adaptive_threshold(self, block_size=35, offset=10):
@@ -188,7 +199,7 @@ class BiofilmProcessor:
         
         # Enhanced Contrast Image
         axes[3].imshow(self.enhanced_data, cmap='gray')
-        axes[3].set_title('Enhanced Contrast')
+        axes[3].set_title('Fourier-based Sharpening')
         
         # Segmentation Results
         if hasattr(self, 'labels'):  # Check if segmentation is available
@@ -211,9 +222,11 @@ processor = BiofilmProcessor("d4.jpg")
 processor.load_image()
 processor.denoise_image()
 processor.sharpen_image()
-processor.enhance_contrast()
+processor.fourier_based_sharpening()
 processor.adaptive_threshold()
 processor.segment_objects()
 features = processor.analyze_objects()
 processor.visualize_results()
+
+
 
